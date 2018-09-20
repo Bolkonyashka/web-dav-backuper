@@ -3,7 +3,7 @@ import easywebdav
 import json
 import hashlib
 import time
-from threading import Thread
+from threading import Thread, Lock
 
 
 class Settings:
@@ -17,6 +17,8 @@ class Settings:
         self.last_backup = ''
         self.last_cleaning = ''
         self.backup_catalog = ''
+        self.backup_in_action = False
+        self.console_in_action = False
 
     def read_settings(self):
         with open("settings.json", "r") as file:
@@ -35,6 +37,10 @@ class Settings:
         with open("settings.json", "w") as file:
             file.write(json.dumps(self.settings_dict))
             file.close()
+
+    def set_backup_interval(self, inter):
+        self.settings_dict["backupInterval"] = inter
+        self.backup_interval = inter
 
 
 class Backuper(Thread):
@@ -61,9 +67,16 @@ class Backuper(Thread):
 
     def get_started(self):
         while True:
-            time.sleep(10)
-            self.do_backup()
-            self.settings.write_settings()
+            time.sleep(self.settings.backup_interval)
+            while self.settings.console_in_action:  # Ожидание завершения действий с консолью
+                pass
+            lock = Lock()
+            self.settings.backup_in_action = True  # Заглушка для консоли
+            with lock:
+                self.settings.read_settings()
+                self.do_backup()
+                self.settings.write_settings()
+            self.settings.backup_in_action = False
 
     def get_list_for_backup(self, backup_path):
         backup_list = []
@@ -113,8 +126,50 @@ class Backuper(Thread):
         print("Backup completed")
 
 
+class ConsoleInterface(Thread):
+    def __init__(self, sett):
+        Thread.__init__(self)
+        self.settings = sett
+        self.command_dict = {"chinterval": self.change_backup_interval}
+
+    def run(self):
+        self.input_action()
+
+    def change_backup_interval(self):
+        print("* Enter the new interval (in sec):")
+        while True:
+            new_interval = input()
+            try:
+                new_interval = int(new_interval)
+            except ValueError:
+                print("** Not a number")
+                continue
+            else:
+                self.settings.set_backup_interval(new_interval)
+                self.settings.write_settings()
+                print("** The new interval is saved. It will take effect after the next backup.")
+                break
+
+    def input_action(self):
+        while True:
+            command = input()
+            self.settings.console_in_action = True  # Заглушка для бекапера
+            if not self.settings.backup_in_action:
+                if command not in self.command_dict.keys():
+                    print("Unknown command")
+                else:
+                    lock = Lock()
+                    with lock:
+                        self.command_dict[command]()
+            else:
+                print("(Blocked) Backup in action. Wait for the backup to complete and enter the command again!")
+            self.settings.console_in_action = False
+
+
 if __name__ == "__main__":
     settings = Settings()
     settings.read_settings()
     backup_client = Backuper(settings)
+    console_interface = ConsoleInterface(settings)
     backup_client.start()
+    console_interface.start()
