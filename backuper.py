@@ -88,7 +88,7 @@ class Backuper(Thread):
             self.webdav_client.upload(self.init_file, "init.txt")
         except easywebdavfixed.OperationFailed as e:
             if e.actual_code == 401:
-                print("Authorization is failed. Enter 'conf' command, 'auth' command and change authorization data.")
+                print("Authorization is failed. Enter 'conf' command, 'chauth' command and change authorization data.")
                 return False
             else:
                 print("Unexpected HTTP error: {0}".format(e.actual_code))
