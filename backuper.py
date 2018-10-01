@@ -71,6 +71,7 @@ class Backuper(Thread):
                                                 username=self.settings.settings_dict["login"],
                                                 password=self.settings.settings_dict["pass"])
         self.main_catalog = ""
+        self.init_file = os.curdir + "\\" + "init.txt"
 
     def get_hash_md5(self, filename):
         with open(filename, 'rb') as f:
@@ -82,27 +83,43 @@ class Backuper(Thread):
                 m.update(data)
             return m.hexdigest()
 
+    def check_auth(self):
+        try:
+            self.webdav_client.upload(self.init_file, "init.txt")
+        except easywebdavfixed.OperationFailed as e:
+            if e.actual_code == 401:
+                print("Authorization is failed. Enter 'conf' command, 'auth' command and change authorization data.")
+                return False
+            else:
+                print("Unexpected HTTP error: {0}".format(e.actual_code))
+                return False
+        else:
+            return True
+
     def run(self):
         self.get_started()
 
     def get_started(self):
-        self.settings.backup_mode = True
-        self.cleaning()
-        self.settings.backup_mode = False
-        counter = 0
-        while True:
-            while self.settings.console_mode:  # Ожидание завершения действий с консолью
-                pass
-            self.settings.backup_mode = True  # Заглушка для консоли
-            if counter >= self.settings.backups_to_cleaning:
-                counter = 0
-                self.cleaning()
-            self.settings.read_settings()
-            self.do_backup()
-            self.settings.write_settings()
+        if self.check_auth():
+            self.settings.backup_mode = True
+            self.cleaning()
             self.settings.backup_mode = False
-            counter += 1
-            time.sleep(self.settings.backup_interval)
+            counter = 0
+            while True:
+                while self.settings.console_mode:  # Ожидание завершения действий с консолью
+                    pass
+                self.settings.backup_mode = True
+                if counter >= self.settings.backups_to_cleaning:
+                    counter = 0
+                    self.cleaning()
+                self.settings.read_settings()
+                self.do_backup()
+                counter += 1
+                self.settings.write_settings()
+                self.settings.backup_mode = False
+                time.sleep(self.settings.backup_interval)
+        else:
+            print("Solve the connection problem and restart the program")
 
     def get_list_for_backup(self, backup_path):
         backup_list = []
@@ -142,7 +159,6 @@ class Backuper(Thread):
         cloud_path = self.settings.cloud_catalog + '/' + dir_name + '/' + file_path
         return cloud_path
 
-
     def do_backup(self):
         print("Backup started")
         for catalog in self.settings.backup_catalogs:
@@ -166,10 +182,15 @@ class Backuper(Thread):
 
     def cleaning(self):
         print("Cleaning in action")
-        self.webdav_client.delete(self.settings.cloud_catalog)
-        self.settings.conf_cleaning()
-        self.settings.write_settings()
-        print("Cleaning completed")
+        try:
+            self.webdav_client.delete(self.settings.cloud_catalog)
+        except easywebdavfixed.OperationFailed as e:
+            if e.actual_code != 404:
+                raise
+        finally:
+            self.settings.conf_cleaning()
+            self.settings.write_settings()
+            print("Cleaning completed")
 
 
 class ConsoleInterface(Thread):
@@ -178,10 +199,20 @@ class ConsoleInterface(Thread):
         self.settings = sett
         self.command_dict = {"conf": self.change_console_mode, "chinterval": self.change_backup_interval,
                              "exit": self.change_console_mode, "chbtc": self.change_backups_to_cleaning,
-                             "chauth": self.change_auth, "adddir": self.add_directory, "deldir": self.del_directory}
+                             "chauth": self.change_auth, "adddir": self.add_directory, "deldir": self.del_directory,
+                             "info": self.get_info}
 
     def run(self):
         self.input_action()
+
+    def get_info(self):
+        print("* Catalogs for backup:")
+        for path in self.settings.backup_catalogs:
+            print(path)
+        print("* Backup interval (in sec):")
+        print(self.settings.backup_interval)
+        print("* Backups count to cloud cleaning:")
+        print(self.settings.backups_to_cleaning)
 
     def del_directory(self):
         print("* Enter the directory path to remove:")
@@ -217,7 +248,7 @@ class ConsoleInterface(Thread):
             new_pass = input()
         self.settings.set_auth(new_login, new_pass)
         self.settings.write_settings()
-        print("*** The new auth data is saved.")
+        print("*** The new auth data is saved. It will take effect after the program restart.")
 
 
     def change_backups_to_cleaning(self):
@@ -230,7 +261,7 @@ class ConsoleInterface(Thread):
                 print("** Not a number")
                 continue
             else:
-                self.settings.backups_to_cleaning = new_count
+                self.settings.set_backups_to_cleaning(new_count)
                 self.settings.write_settings()
                 print("*** The new value is saved.")
                 break
