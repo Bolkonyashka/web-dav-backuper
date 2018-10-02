@@ -1,0 +1,1 @@
+{"host": "webdav.yandex.ru", "port": 443, "login": "", "pass": "", "backupInterval": 25, "backupsCountToCleaning": 5, "catalogs": ["D:\\Projects\\web-dav-backuper\\server", "D:\\fff"], "existsDirectories": [], "filesHash": []}
